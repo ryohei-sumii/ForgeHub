@@ -1,4 +1,4 @@
-# ForgeHub 要件定義書 v0.2
+# ForgeHub 要件定義書 v0.3
 
 ## 改訂履歴
 
@@ -6,6 +6,7 @@
 | ---- | ---------- | ---------------------------------------------------------------- |
 | v0.1 | -          | 初版（スコープ・技術スタック・アーキテクチャ概要）                     |
 | v0.2 | 2026-07-04 | ポートフォリオ向けに全面改訂。背景/ペルソナ、機能要件詳細、画面一覧、データモデル、API設計方針、非機能要件、開発・テスト方針、CI/CD、リスクを追加 |
+| v0.3 | 2026-07-04 | APIキー発行・失効の認可をAdmin/所有者Developerに限定するよう修正（4.3・7章）。他Developerが所有するAPIのキーを無断操作できてしまう権限昇格・可用性リスクを解消 |
 
 ## 1. プロジェクト概要
 
@@ -95,6 +96,7 @@ ForgeHub
 -   **受け入れ条件**:
     -   API定義（名称・概要・エンドポイント・所有者等）の一覧・詳細を参照できる。
     -   APIキーの発行・失効ができ、キーそのものは発行時のみ表示し、以降は再表示しない（ハッシュ化して保存）。
+    -   APIキーの発行・失効は、Adminは任意のAPIに対して、Developerは自身が`owner_id`であるAPIに対してのみ実行できる。他のDeveloperが所有するAPIのキー操作は403で拒否する（他チームのAPIキーを無断で失効・発行できてしまう権限昇格・可用性リスクを防ぐため）。
     -   API定義・APIキー操作は監査ログに記録される。
 
 ### 4.4 ジョブ管理（F-04）
@@ -205,8 +207,8 @@ erDiagram
 | GET      | /api/v1/users                 | ユーザー一覧             | Admin                    |
 | POST     | /api/v1/users                 | ユーザー作成             | Admin                    |
 | GET      | /api/v1/apis                  | API一覧                  | Admin, Developer         |
-| POST     | /api/v1/apis/{id}/keys        | APIキー発行              | Admin, Developer         |
-| DELETE   | /api/v1/apis/{id}/keys/{keyId}| APIキー失効              | Admin, Developer         |
+| POST     | /api/v1/apis/{id}/keys        | APIキー発行              | Admin, Developer（所有者のみ） |
+| DELETE   | /api/v1/apis/{id}/keys/{keyId}| APIキー失効              | Admin, Developer（所有者のみ） |
 | GET      | /api/v1/jobs                  | ジョブ一覧               | Admin, Developer, Operator |
 | POST     | /api/v1/jobs/{id}/executions  | ジョブ手動実行           | Admin, Developer, Operator |
 | GET      | /api/v1/audit-logs             | 監査ログ検索             | Admin, Operator          |
