@@ -104,6 +104,7 @@ erDiagram
 | action | `detail`形式 |
 | ------ | ------------ |
 | `USER_*`（USER_CREATED/UPDATED/ROLE_CHANGED/DISABLED/ENABLED/PASSWORD_RESET） | `{before, after}`。`role` / `email` / `enabled`の差分のみを記録する。 |
+| `API_DEFINITION_CREATED` / `API_DEFINITION_UPDATED` | `{name, endpoint, owner_id}`（`docs/design/f-03-api-management.md` 10章と整合） |
 | `API_DEFINITION_DELETED` | `{revoked_key_count}`（カスケード失効したAPIキー件数） |
 | `API_KEY_ISSUED` / `API_KEY_REVOKED` | `{key_prefix, expires_at}` |
 | `JOB_*`（JOB_CREATED/UPDATED/DELETED） | `{name, type}` |
@@ -310,7 +311,7 @@ sequenceDiagram
 
 | 観点 | 制御内容 |
 | ---- | -------- |
-| denylist-strip（機密混入の最終防波堤） | `AuditService.append`実行時に、`detail`から`password` / `initial_password` / `api_key` / `key_hash` / `token` / `secret` / `authorization`のキーを除去する。F-01〜F-04の各producerが実装ミスで機密値を`detail`に混入させた場合でも、この中央防御によって漏洩を遮断する（全producer共通の最終防波堤）。 |
+| denylist-strip（機密混入の最終防波堤） | `AuditService.append`実行時に、`detail`から`password` / `initial_password` / `api_key` / `key_hash` / `token` / `secret` / `authorization`のキーを除去する。この走査は`detail`のトップレベルキーのみを対象とせず、`parameters`（`JOB_EXECUTION_TRIGGERED`）・`before`/`after`（`USER_*`）等のネストしたjsonb構造の内部まで**再帰的に**キー名を走査し、一致するキーをすべて除去する。F-01〜F-04の各producerが実装ミスで機密値をネスト構造の内部に混入させた場合でも、この中央防御によって漏洩を遮断する（全producer共通の最終防波堤）。 |
 | 不変性4層防御 | 「8. 不変性・改ざん防止強制」参照。 |
 | actor偽装防止 | `actor_id`は検証済みAT `sub`クレーム由来のみを採用し、リクエストボディ・クライアント指定の値は一切採らない。 |
 | SQLインジェクション防止 | 検索フィルタ（`actor_id`/`action`/`target_type`/`target_id`/`from`/`to`）はすべてprepared statementでバインドする。`target_id`・`actor_id`はuuid型として検証し、文字列連結によるクエリ構築を行わない。`detail`はjsonbパラメータとしてバインドされるため、構造化データゆえログ行汚染（改行等の混入によるログ偽装）は成立しない。 |
