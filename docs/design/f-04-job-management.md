@@ -5,6 +5,7 @@
 | 版   | 日付       | 変更内容                     |
 | ---- | ---------- | ---------------------------- |
 | v0.1 | 2026-07-05 | 初版（design-doc-planner のプランを正式設計書に展開） |
+| v0.2 | 2026-07-05 | F-05設計書（`docs/design/f-05-audit-log.md`）の確定を反映。監査ログ追記を「DBコミット成功後」から業務操作と同一Txへ変更（確定事項D準拠、9.1・11章）。`JOB_*`アクション語彙・`detail`形式・実行完了を監査対象外とする方針（確定事項B）のF-05整合を確定しOPENを解消（16章） |
 
 ## 1. 目的・スコープ境界
 
@@ -236,8 +237,9 @@ sequenceDiagram
             D-->>A: 制約違反
             A-->>C: 409 JOB_EXECUTION_IN_PROGRESS
         else 挿入成功
+            A->>L: JOB_EXECUTION_TRIGGERED 追記（同一Tx内）
+            A->>D: 業務INSERT + 監査INSERT を同時にコミット
             D-->>A: コミット成功
-            A->>L: JOB_EXECUTION_TRIGGERED
             A-->>C: 202 { execution_id, status: PENDING, location }
         end
     end
@@ -336,9 +338,9 @@ F-05が提供する`AUDIT_LOG`テーブル（`actor_id`, `action`, `target_type`
 
 実行の完了（`SUCCEEDED`/`FAILED`/`TIMED_OUT`への遷移）は、pollerやreconcilerといったシステムが自律的に行うイベントであり、人間のactorが存在しない。このため、実行完了自体はAUDIT_LOGには記録せず、`job_executions.status`の遷移で追跡する方針とする。`docs/requirements.md` 4.4「ジョブの登録・実行は監査ログに記録される」の「実行」は、EP6によるトリガー記録（`JOB_EXECUTION_TRIGGERED`）をもって充足するものと解釈する。
 
-監査ログへの追記はDBコミット成功後に行う。監査ログは追記のみとし、UI/APIからの更新・削除経路は持たない（`docs/requirements.md` 4.5・10.4「改ざん防止」準拠）。
+監査ログへの追記は、業務操作のDB更新と**同一DBトランザクション内**で行い、業務コミットと監査挿入の原子性を保証する（`docs/design/f-05-audit-log.md` 7章 確定事項D準拠。「業務操作は成功したが監査ログに記録されていない」という証跡欠落を排除する）。監査ログは追記のみとし、UI/APIからの更新・削除経路は持たない（`docs/requirements.md` 4.5・10.4「改ざん防止」準拠）。
 
-なお、本章で定義した`JOB_*`アクション語彙および`detail`形式が、F-05側の設計文書と最終的に整合しているかどうかは未確認である（※本項目は未決。`docs/design/f-01-jwt-auth.md`・`docs/design/f-02-user-role-management.md`・`docs/design/f-03-api-management.md`と同種のOPEN。詳細は末尾「16. 未決事項」参照）。
+本章で定義した`JOB_*`アクション語彙・`detail`形式はF-05側のaction語彙レジストリ（`docs/design/f-05-audit-log.md` 4章）にcanonical（正典）として採録され、実行完了（`SUCCEEDED`/`FAILED`/`TIMED_OUT`への遷移）を監査対象外とする前段の方針も同章の確定事項Bとして承認済みであり、いずれも整合確認済みである。
 
 ## 12. セキュリティ制御
 
@@ -399,9 +401,10 @@ Phase1（MVP）における明確な非対応事項は以下の通り。
 以下は本設計において解決に至らず、`OPEN`として残された事項である。実装・レビュー時には特に注意すること（各該当章の本文中にも同様の注記を配置済み）。
 
 1. **Cloud Run制約と非同期実行の両立**: 在プロセスのpoller/reconcilerが背景処理を継続するためには、backend用Cloud Runサービスを`min-instances=1`かつCPU常時割当（`--no-cpu-throttling`）とする必要がある。これは`docs/requirements.md` 10.3・14章の「最小インスタンス数を0にし、無操作時はスケールインする（コスト優先）」という方針と部分的に矛盾する（frontend側は0スケールを維持する前提）。恒久的な解決策はPhase3のCloud Tasks / Pub/Subによるキュー化であり、MVPでは`min-instances=1`＋heartbeatによる孤児実行回収というトレードオフを受容する。design-doc-reviewerおよびインフラ担当との合意が必要である（「1. 目的・スコープ境界」「4. job_executionデータモデル・実行基盤」「15. スコープ境界」参照）。
-2. **F-05監査ログスキーマとの最終整合確認**: 本書で定義した`JOB_*`アクション語彙・`detail`形式、および実行完了を監査対象とするか否かが、F-05（監査ログ）の設計文書側と最終的に整合しているかは未確認である。`docs/design/f-01-jwt-auth.md`・`docs/design/f-02-user-role-management.md`・`docs/design/f-03-api-management.md`と同種のOPENである（「11. 監査ログ（F-05連携）」参照）。
-3. **MVP同梱ハンドラの具体セット・各パラメータJSON Schemaの確定**: MVPで実際に同梱するハンドラの種類と、各typeに対応するJSON Schemaの詳細仕様は実装時に確定する（「5. ジョブハンドラ／typeレジストリ」「15. スコープ境界」参照）。
-4. **`parameters`／`log_excerpt`内の機密自動redactの具体ルール**: 機密情報を自動検出・マスキングするための具体的なルール（キー名パターンのマッチング方式等）は未確定である（「12. セキュリティ制御」参照）。
-5. **実行完了通知**: Slack等への実行完了通知はPhase2の通知基盤に依存するため、本書の対象外である（`docs/requirements.md` 3.2）。
+2. **MVP同梱ハンドラの具体セット・各パラメータJSON Schemaの確定**: MVPで実際に同梱するハンドラの種類と、各typeに対応するJSON Schemaの詳細仕様は実装時に確定する（「5. ジョブハンドラ／typeレジストリ」「15. スコープ境界」参照）。
+3. **`parameters`／`log_excerpt`内の機密自動redactの具体ルール**: 機密情報を自動検出・マスキングするための具体的なルール（キー名パターンのマッチング方式等）は未確定である（「12. セキュリティ制御」参照）。
+4. **実行完了通知**: Slack等への実行完了通知はPhase2の通知基盤に依存するため、本書の対象外である（`docs/requirements.md` 3.2）。
+
+（F-05監査ログスキーマとの最終整合確認については、`JOB_*`アクション語彙・`detail`形式が`docs/design/f-05-audit-log.md` 4章のaction語彙レジストリにcanonicalとして採録され、実行完了を監査対象外とする方針も同章の確定事項Bとして承認、追記方式も同7章 確定事項D「業務操作と同一Tx」に改めたことで解消済みのため本節から削除した。「11. 監査ログ（F-05連携）」参照。）
 
 **再掲・絶対制約**: 任意のコード・シェルコマンド・ユーザー指定URLの実行は一切不可（`type`はハンドラレジストリに限定）。`parameters`・`log_excerpt`・監査ログの`detail`にシークレット・トークン・パスワードを出力しない。監査ログは追記のみで更新・削除経路を持たない。OperatorはF-04（`/api/v1/jobs`系）にアクセス可能（F-03とは逆の扱い）。実行トリガー（EP6）は非同期202を返し、長時間処理はAPIレスポンスの範囲外で行う。cron・実行キャンセル・外部キュー基盤はMVP対象外。
