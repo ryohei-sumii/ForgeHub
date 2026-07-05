@@ -6,6 +6,7 @@
 | ---- | ---------- | ---------------------------- |
 | v0.1 | 2026-07-04 | 初版（design-doc-planner のプランを正式設計書に展開） |
 | v0.2 | 2026-07-04 | design-doc-reviewerの指摘を反映。`name`一意制約をソフト削除対応の部分UNIQUEに変更、EP4のowner再割当に対象ユーザーの役割・有効状態検証を追加（3章・5章・9章・13章）。あわせて`docs/requirements.md`側のAPIキー発行/失効の認可を所有者限定に修正し本書と整合させた |
+| v0.3 | 2026-07-05 | F-05設計書（`docs/design/f-05-audit-log.md`）の確定を反映。監査ログ追記を「DBコミット成功後」から業務操作と同一Txへ変更（確定事項D準拠、8章・10章）。`API_DEFINITION_*`/`API_KEY_*`アクション語彙・`detail`形式のF-05整合を確定しOPENを解消（15章） |
 
 ## 1. 目的・スコープ境界
 
@@ -205,9 +206,10 @@ sequenceDiagram
             A-->>C: 400 API_KEY_INVALID_EXPIRY
         else 正常
             A->>A: CSPRNGでキー生成 → SHA-256でハッシュ化
-            A->>D: api_key インサート
+            A->>D: api_key インサート（未コミット）
+            A->>L: API_KEY_ISSUED 追記（同一Tx内）
+            A->>D: 業務INSERT + 監査INSERT を同時にコミット
             D-->>A: コミット成功
-            A->>L: API_KEY_ISSUED
             A-->>C: 201 { id, key_prefix, api_key(平文), expires_at }
         end
     end
@@ -228,9 +230,10 @@ sequenceDiagram
     alt キーが存在しない、またはapi_id不一致
         A-->>C: 404 API_KEY_NOT_FOUND
     else 存在し一致する
-        A->>D: revoked_at=now() UPDATE（WHERE revoked_at IS NULL、冪等）
+        A->>D: revoked_at=now() UPDATE（WHERE revoked_at IS NULL、冪等・未コミット）
+        A->>L: API_KEY_REVOKED 追記（同一Tx内）
+        A->>D: 業務UPDATE + 監査INSERT を同時にコミット
         D-->>A: コミット成功
-        A->>L: API_KEY_REVOKED
         A-->>C: 204 No Content
     end
 ```
@@ -252,8 +255,9 @@ sequenceDiagram
     else 存在する
         A->>D: 同一Tx: deleted_at=now() 設定
         A->>D: 同一Tx: 配下の全activeキーをrevoked_at=now()で一括UPDATE
+        A->>L: 同一Tx: API_DEFINITION_DELETED 追記（detail.revoked_key_count に失効件数を記録）
+        A->>D: 業務UPDATE + 監査INSERT を同時にコミット
         D-->>A: コミット成功
-        A->>L: API_DEFINITION_DELETED（detail.revoked_key_count に失効件数を記録）
         A-->>C: 204 No Content
     end
 ```
@@ -292,10 +296,10 @@ F-05が提供する`AUDIT_LOG`テーブル（`actor_id`, `action`, `target_type`
 - `target_id`には対象（API定義またはAPIキー）のIDを記録する。
 - `detail`には`name`・`endpoint`・`owner_id`・`expires_at`・`key_prefix`・`revoked_key_count`（EP5でのカスケード失効件数）等の**非機密情報のみ**を記録する。
 - **平文APIキー・`key_hash`は、いかなる形式であっても`detail`に一切含めない。** これは本書における絶対制約であり、「11. セキュリティ制御」でも重複して明記する。
-- 監査ログへの追記はDBコミット成功後に行う。
+- 監査ログへの追記は、業務操作のDB更新と**同一DBトランザクション内**で行い、業務コミットと監査挿入の原子性を保証する（`docs/design/f-05-audit-log.md` 7章 確定事項D準拠。「業務操作は成功したが監査ログに記録されていない」という証跡欠落を排除する）。
 - 監査ログは追記のみとし、UI/APIからの更新・削除経路は持たない（`docs/requirements.md` 4.5・10.4「改ざん防止」準拠）。
 
-なお、本章で定義した`API_DEFINITION_*`/`API_KEY_*`アクション語彙および`detail`形式が、F-05側の設計文書と最終的に整合しているかどうかは未確認である（※本項目は未決。詳細は末尾「15. 未決事項」参照）。
+本章で定義した`API_DEFINITION_*`/`API_KEY_*`アクション語彙および`detail`形式は、F-05側のaction語彙レジストリ（`docs/design/f-05-audit-log.md` 4章）にcanonical（正典）として採録され、整合確認済みである。
 
 ## 11. セキュリティ制御
 
@@ -352,9 +356,10 @@ Phase1（MVP）における明確な非対応事項は以下の通り。
 以下は本設計において解決に至らず、`OPEN`として残された事項である。実装・レビュー時には特に注意すること（各該当章の本文中にも同様の注記を配置済み）。
 
 1. **APIキーの実行時認証（外部呼び出しのキー検証エンドポイント／ゲートウェイ）が未設計**: MVPでは対象外とする。`key_hash`のUNIQUE indexなど格納設計は将来対応可能な形にしておくが、検証経路そのもの・レート制限・`last_used_at`の更新方式はPhase2で設計する必要がある（「1. 目的・スコープ境界」「11. セキュリティ制御」「14. スコープ境界」参照）。
-2. **F-05監査ログスキーマとの最終整合確認**: 本書で定義した`API_DEFINITION_*`/`API_KEY_*`アクション語彙および`detail`形式が、F-05（監査ログ）の設計文書側と最終的に整合しているかどうかは未確認である。これは`docs/design/f-01-jwt-auth.md`・`docs/design/f-02-user-role-management.md`と同種のOPENである（「10. 監査ログ（F-05連携）」参照）。
-3. **owner無効化時のAPI/APIキーの扱い**: F-02のユーザー無効化（disable）が発生した場合、当該ユーザーがownerであるAPI定義・発行者であるAPIキーを自動的に失効させるか、レコードをそのまま保持しAdminによる再割当（EP4の`owner_id`変更）に委ねるかは未決である。現案は後者（レコード保持＋Admin再割当）だが、自動失効ポリシーの採否は要検討である（「14. スコープ境界」参照）。
-4. **`endpoint`の重複許容・形式バリデーションの厳密仕様**: 複数のAPI定義が同一`endpoint`を指すことを許容するか、また`endpoint`をURL形式として厳密にバリデーションするかパス表記も許容するかについては、本書では確定していない。
+2. **owner無効化時のAPI/APIキーの扱い**: F-02のユーザー無効化（disable）が発生した場合、当該ユーザーがownerであるAPI定義・発行者であるAPIキーを自動的に失効させるか、レコードをそのまま保持しAdminによる再割当（EP4の`owner_id`変更）に委ねるかは未決である。現案は後者（レコード保持＋Admin再割当）だが、自動失効ポリシーの採否は要検討である（「14. スコープ境界」参照）。
+3. **`endpoint`の重複許容・形式バリデーションの厳密仕様**: 複数のAPI定義が同一`endpoint`を指すことを許容するか、また`endpoint`をURL形式として厳密にバリデーションするかパス表記も許容するかについては、本書では確定していない。
+
+（F-05監査ログスキーマとの最終整合確認については、`API_DEFINITION_*`/`API_KEY_*`アクション語彙・`detail`形式が`docs/design/f-05-audit-log.md` 4章のaction語彙レジストリにcanonicalとして採録され、追記方式も同7章 確定事項D「業務操作と同一Tx」に改めたことで解消済みのため本節から削除した。「10. 監査ログ（F-05連携）」参照。）
 
 **再掲・絶対制約**: 平文APIキーは発行レスポンスで一度だけ返却し、以降は再表示不可（監査ログ`detail`・アプリケーションログ・例外メッセージへの出力も禁止）。APIキーはSHA-256ハッシュのみを保存し平文を保持しない。監査ログは追記のみで更新・削除経路を持たない。OperatorはF-03（`/api/v1/apis`系）にアクセス不可。APIキーの実行時認証（外部呼び出しの検証）はMVP対象外。
 </content>
