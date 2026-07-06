@@ -548,8 +548,13 @@ public class AuthenticationService {
     }
 
     public void logout(String rt) {
-        // jwtVerifier.verifyRefreshToken(rt)（可能な範囲で） → refreshTokenService.invalidateFamily(claims)
-        // → AuthEventRecorder.record(LOGOUT, ...)
+        // rtがnull、またはjwtVerifier.verifyRefreshToken(rt)がTokenInvalidExceptionを送出した場合:
+        //   invalidateFamily/AuthEventRecorder.record(LOGOUT, ...)は呼ばずreturn（例外を投げない）
+        // rtが有効な場合:
+        //   refreshTokenService.invalidateFamily(claims) → AuthEventRecorder.record(LOGOUT, ...)
+        // いずれの分岐でも呼出元（AuthController.logout）は204 No Contentを返す
+        //   （rt無効時も含め常に204とすることで、Cookieクリアと合わせクライアント側の
+        //     ログアウト操作をべき等にする）
     }
 }
 ```
@@ -672,6 +677,8 @@ public class JwtVerifierHs256 implements JwtVerifier {
     @Override
     public AccessClaims verifyAccessToken(String token) throws TokenExpiredException, TokenInvalidException {
         // alg != HS256（none/RS256混入含む）→ TokenInvalidException
+        // iss != "forgehub" → TokenInvalidException
+        // aud != "forgehub-api" → TokenInvalidException
         // exp超過（leeway 30秒） → TokenExpiredException
         // typ != access → TokenInvalidException
     }
@@ -679,6 +686,8 @@ public class JwtVerifierHs256 implements JwtVerifier {
     @Override
     public RefreshClaims verifyRefreshToken(String token) throws TokenInvalidException {
         // alg != HS256 → TokenInvalidException
+        // iss != "forgehub" → TokenInvalidException
+        // aud != "forgehub-api" → TokenInvalidException
         // exp超過 → TokenInvalidException（RTはExpiredではなくInvalid扱い）
         // typ != refresh → TokenInvalidException
     }
@@ -968,7 +977,11 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         // SessionCreationPolicy.STATELESS
         // csrf無効化（Bearer方式のため）
-        // /api/v1/auth/login は permitAll、それ以外は anyRequest().authenticated()（デフォルトdeny）
+        // /api/v1/auth/login, /api/v1/auth/refresh, /api/v1/auth/logout は permitAll
+        //   （詳細設計書7章の認可要件: login=不要、refresh=有効なRT、logout=有効なRT/ATであり、
+        //     いずれも有効なATの保有を前提としないため。RT/ATの検証自体は
+        //     AuthenticationService.refresh/logout（Service層）で行う）
+        // それ以外は anyRequest().authenticated()（デフォルトdeny、有効なAT必須）
         // JwtAuthenticationFilter を UsernamePasswordAuthenticationFilter の前段に追加
         // exceptionHandling に RestAuthenticationEntryPoint / RestAccessDeniedHandler を設定
     }
@@ -1132,13 +1145,15 @@ sequenceDiagram
 
 ### 10.3 監査アクションとdetail
 
-| `AuditAction` | 発火タイミング | detail想定内容（非機密のみ） |
+`detail`形式は`docs/design/f-05-audit-log.md` 4章の`detail`形式canon（AUTH系は一律`{email, ip, reason_code}`）に従う。本書はこのcanonにfamilyId/jti等の独自フィールドを追加しない（F-05側canonの変更は本書のスコープ外であり、本書は詳細設計書・F-05に無い新たな業務決定を追加しない）。
+
+| `AuditAction` | 発火タイミング | detail想定内容（非機密のみ、F-05 4章canon準拠） |
 | ------------- | -------------- | ----------------------------- |
-| `LOGIN_SUCCESS` | ログイン成功時 | email, ip |
-| `LOGIN_FAILURE` | ユーザー不在・パスワード不一致・アカウント無効時 | email, ip, reason_code（パスワードは含めない） |
-| `LOGOUT` | ログアウト時 | familyId |
-| `TOKEN_REFRESH` | RTローテーション成功時 | 旧jti, 新jti |
-| `REFRESH_REUSE_DETECTED` | 再利用検知時 | familyId, jti |
+| `LOGIN_SUCCESS` | ログイン成功時 | `{email, ip, reason_code}`（`reason_code`は`null`） |
+| `LOGIN_FAILURE` | ユーザー不在・パスワード不一致・アカウント無効時 | `{email, ip, reason_code}`（パスワードは含めない） |
+| `LOGOUT` | ログアウト時 | `{email, ip, reason_code}`（`reason_code`は`null`） |
+| `TOKEN_REFRESH` | RTローテーション成功時 | `{email, ip, reason_code}`（`reason_code`は`null`） |
+| `REFRESH_REUSE_DETECTED` | 再利用検知時 | `{email, ip, reason_code}`（`reason_code`は`null`） |
 
 `detail`はproducer（`AuthEventRecorder`）側で非機密情報のみを組み立てる（`docs/design/f-05-audit-log.md` 12章のdenylist二重防御の対象にもなる）。LOGIN_FAILUREの`detail`にパスワードを含めることは絶対制約3により禁止される。
 
