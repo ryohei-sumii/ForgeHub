@@ -123,7 +123,7 @@ public class User {
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = RoleConverter.class)
     @Column(nullable = false)
     private Role role;
 
@@ -176,7 +176,7 @@ public class User {
 
 不変条件: `role`は非null。`passwordHash`はbcryptハッシュのみを保持し、平文・生成直後のパスワードは一切保持しない。`disable()`は`enabled=false`かつ`disabledAt=now`を同時に設定し、`enable()`は`enabled=true`かつ`disabledAt=null`に戻す。全変異メソッドは`updatedAt`を更新する。setterは非公開とし、永続化ロジック自体はエンティティに書かない。`applyEmail`/`applyRole`は変化の有無を`boolean`で返し、呼出側（`UserMutationTx`）でno-op判定（監査発火の要否判断）に用いる。
 
-JPAアノテーションは`@Entity`/`@Id`/`@Column`/`@Enumerated(STRING)`等の宣言的アノテーションのみを許容し、永続化ロジック自体はエンティティに書かない。
+JPAアノテーションは`@Entity`/`@Id`/`@Column`/`@Convert`等の宣言的アノテーションのみを許容し、永続化ロジック自体はエンティティに書かない。`role`は`@Enumerated(EnumType.STRING)`ではなく`RoleConverter`（`AttributeConverter<Role, String>`、6.7節参照）を用いる。`@Enumerated(STRING)`はenum定数名（`ADMIN`等、大文字）をそのまま永続化するため、詳細設計書2章が定めるDB格納値（`'Admin'`/`'Developer'`/`'Operator'`、title case、`CHECK`制約と同値）と食い違い、CHECK制約違反および6.1章の最終有効Admin計数不能を引き起こす。`RoleConverter`により`Role`⇄title-case文字列の変換をここに一元化する。
 
 SOLID: S（状態遷移の不変条件のみを責務とし、CRUD調整・監査・HTTPの関心事は一切持たない）。
 
@@ -190,11 +190,17 @@ public enum Role {
         return "ROLE_" + name();
     }
 
+    public String toExternal() {
+        // title-case表現（"Admin"/"Developer"/"Operator"）へ変換。DB格納値・APIレスポンスの両方で共通利用する
+    }
+
     public static Role fromExternal(String v) throws InvalidRoleException {
-        // 大文字小文字等の外部表現からenumへ変換。一致しない場合はInvalidRoleException(400)
+        // title-case外部表現（大文字小文字は許容）からenumへ変換。一致しない場合はInvalidRoleException(400)
     }
 }
 ```
+
+`toExternal()`は詳細設計書2章のDB格納値・APIレスポンス例（`"role": "Developer"`）と同じtitle-case表現を返す唯一の変換元であり、`RoleConverter`（6.7節）と`UserResponseMapper`（7.2節）はいずれも本メソッドに委譲することで表現の重複定義・食い違いを防ぐ。`authority()`はSpring Securityの権限表現規約（`ROLE_ADMIN`等、大文字）用であり、DB格納値・APIレスポンスとは別軸のため`name()`ベースのままでよい。
 
 SOLID: O（enum外の値は`fromExternal`により400（`USER_INVALID_ROLE`）へ拒否され、DB `CHECK`制約との二重防御となる。ロール種別追加時は本enumのみを変更すればよく、呼出元の分岐追加を要しない）。
 
@@ -249,6 +255,7 @@ classDiagram
         DEVELOPER
         OPERATOR
         +authority() String
+        +toExternal() String
         +fromExternal(String)$ Role
     }
     class User {
@@ -547,10 +554,8 @@ public class UserCommandService {
 
     public void disable(UUID targetId, UUID actorId)
             throws UserNotFoundException, SelfModificationForbiddenException, LastAdminException {
-        boolean disabled = userMutationTx.disable(targetId, actorId);
-        if (disabled) {
-            sessionRevoker.purgeUser(targetId); // Tx確定後（コミット後）に実行。失敗時はSessionPurgeFailedException(503)
-        }
+        userMutationTx.disable(targetId, actorId); // 戻り値（実際にDB変更が生じたか）に関わらず、次のpurgeは常に実行する
+        sessionRevoker.purgeUser(targetId); // Tx確定後（コミット後）に実行。失敗時はSessionPurgeFailedException(503)
     }
 
     public void enable(UUID targetId, UUID actorId) throws UserNotFoundException {
@@ -567,7 +572,7 @@ public class UserCommandService {
 
 - 依存: `UserMutationTx`、`SessionRevoker`。コンストラクタ注入。
 - Tx: 本クラスには`@Transactional`を付与しない。`userMutationTx.*`の呼出しはBean境界を越えるため、Spring AOPプロキシによる`@Transactional`が正しく作動し、`disable`/`resetPassword`メソッド内で`purgeUser`を呼び出す時点では既に業務Txはコミット済みとなる（**self-invocationによる`@Transactional`無効化を、Tx境界クラス`UserMutationTx`と調整役クラス`UserCommandService`の別Bean分離により回避している**。この構成は致命的なTx境界規約であり、6章冒頭・11章にも重複して明記する）。
-- `disable`は`userMutationTx.disable()`が`true`（実際に無効化が行われた）を返した場合のみ`purgeUser`を実行する。既に無効化済み（no-op）の場合は`purgeUser`を呼ばない。
+- `disable`は`userMutationTx.disable()`の戻り値（実際にDB変更が生じたか）に関わらず、常に`purgeUser`を実行する。既に無効化済み（no-op）の場合にpurgeをスキップすると、詳細設計書10.1章が想定する回復フロー（Redis不通で503を返した後、Adminが同一ユーザーへdisableを再実行してRT一括失効を完了させる）が機能しなくなる。`rtuser:{userId}`索引の削除は既に空である場合も含めて冪等な操作であるため、DB上no-opの再実行であっても追加でpurgeを試みることに副作用はない。
 - `resetPassword`は常に`purgeUser`を実行する（パスワード再格納は必ず新規発生する操作であるため）。
 - purgeの失敗（`SessionPurgeFailedException`、503）はそのまま呼出元（`UserController`）へ伝播する。DB更新・監査記録は`UserMutationTx`側で既にコミット済みであるため、この例外はセッション失効の失敗のみを表す。
 - SOLID: S（Tx確定後の調整のみを責務とし、業務ルール・監査detail組立は一切持たない）。
@@ -708,8 +713,9 @@ classDiagram
 
 | クラス | パッケージ | 実装インターフェース | 責務 |
 | ------ | ---------- | -------------------- | ---- |
-| `UserJpaRepositoryAdapter` | `.infrastructure.persistence` | `UserRepository` | Spring Data JPA委譲、email重複の同期例外化、Admin計数の悲観ロック |
+| `UserJpaRepositoryAdapter` | `.infrastructure.persistence` | `UserRepository` | Spring Data JPA委譲、email重複の同期例外化、Admin計数の行ロック（対象行SELECT + アプリ側計数） |
 | `SpringDataUserRepository` | `.infrastructure.persistence` | （Spring Data JPA、`UserRepository`ポートとは別物） | JpaRepository/JpaSpecificationExecutor |
+| `RoleConverter` | `.infrastructure.persistence` | `AttributeConverter<Role, String>` | `Role`⇄DB格納値（title-case文字列）の双方向変換 |
 | `BcryptPasswordHasher` | `.infrastructure.security` | `PasswordHasher` | bcrypt（cost=10）ハッシュ生成 |
 | `SecureRandomPasswordGenerator` | `.infrastructure.security` | `PasswordGenerator` | CSPRNG24文字初期パスワード生成 |
 | `UuidUserIdGenerator` | `.infrastructure.security` | `UserIdGenerator` | UUID生成 |
@@ -749,14 +755,15 @@ public class UserJpaRepositoryAdapter implements UserRepository {
     }
 
     @Override
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
     public long countEnabledAdminsWithLock() {
-        // SELECT COUNT(*) FROM users WHERE enabled=true AND role='Admin' FOR UPDATE 相当
+        // PostgreSQLはCOUNT(*)等の集約関数を伴うSELECTにFOR UPDATEを付与できないため、
+        // 対象行（id）をSELECT ... FOR UPDATEで行ロック取得し、アプリ側で件数判定する
+        return springDataUserRepository.findEnabledAdminIdsForUpdate().size();
     }
 }
 ```
 
-実装: `saveAndFlush`で`DataIntegrityViolationException`を同期捕捉し`EmailConflictException`へ変換する（呼出元のTxをrollbackさせ、監査INSERTがコミットされる事態を防ぐ）。`countEnabledAdminsWithLock`は`@Lock(PESSIMISTIC_WRITE)`による行ロックで計数する。`search`はSpecification/JPQLで`role`/`enabled`/`q`（emailの部分一致）フィルタとページングを実装する。
+実装: `saveAndFlush`で`DataIntegrityViolationException`を同期捕捉し`EmailConflictException`へ変換する（呼出元のTxをrollbackさせ、監査INSERTがコミットされる事態を防ぐ）。`countEnabledAdminsWithLock`はPostgreSQLの制約（集約関数を伴う`SELECT`へ`FOR UPDATE`を付与できない）により`SELECT COUNT(*) ... FOR UPDATE`が実現不可能であるため、`SpringDataUserRepository.findEnabledAdminIdsForUpdate()`（`@Lock(PESSIMISTIC_WRITE)`＋`enabled=true AND role=Role.ADMIN`の行を`id`のみ取得するJPQL）で対象行を行ロックしたうえで取得し、その件数（`List.size()`）をアプリ側で判定する。JPQLの比較は`RoleConverter`経由でJavaの`Role`型として解決されるため、DB格納値のtitle-case表現とは独立して整合する。`search`はSpecification/JPQLで`role`/`enabled`/`q`（emailの部分一致）フィルタとページングを実装する。
 
 SOLID: D（domainの`UserRepository`ポートを実装し、application側はこの具象を一切知らない）。L（`UserRepository`契約を満たす形で置換可能な実装であり、将来別ストアへ差し替えてもdomain/application側の契約は変わらない）。
 
@@ -766,6 +773,12 @@ SOLID: D（domainの`UserRepository`ポートを実装し、application側はこ
 public interface SpringDataUserRepository
         extends JpaRepository<User, UUID>, JpaSpecificationExecutor<User> {
     // 派生クエリ + Specificationにより role/enabled/q フィルタと検索を実現
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u.id FROM User u WHERE u.enabled = true AND u.role = com.forgehub.user.domain.model.Role.ADMIN")
+    List<UUID> findEnabledAdminIdsForUpdate();
+    // 集約関数(COUNT)にFOR UPDATEを付与できないPostgreSQLの制約を回避するため、
+    // 対象行のidのみを行ロック付きで取得する（件数判定はアプリ側、6.1節参照）
 }
 ```
 
@@ -845,6 +858,33 @@ public class RefreshTokenStoreSessionRevoker implements SessionRevoker {
 
 SOLID: D（F-02の`SessionRevoker`ポートをinfrastructureで実装し、F-01の具象境界（Redis/`RefreshTokenStore`の8メソッド）をここに隔離する。domain/applicationはF-01を一切知らない）。
 
+### 6.7 RoleConverter
+
+```java
+@Converter(autoApply = true)
+public class RoleConverter implements AttributeConverter<Role, String> {
+
+    @Override
+    public String convertToDatabaseColumn(Role role) {
+        return role == null ? null : role.toExternal(); // "Admin"/"Developer"/"Operator"
+    }
+
+    @Override
+    public Role convertToEntityAttribute(String dbValue) {
+        try {
+            return dbValue == null ? null : Role.fromExternal(dbValue);
+        } catch (InvalidRoleException e) {
+            // DB上のCHECK制約により通常到達しない防御的分岐
+            throw new IllegalStateException("Unrecognized role value in DB: " + dbValue, e);
+        }
+    }
+}
+```
+
+実装: `User.role`（2.1節）の永続表現を`Role.toExternal()`/`Role.fromExternal()`（2.2節）へ委譲する`AttributeConverter`である。`@Enumerated(EnumType.STRING)`はenum定数名（`ADMIN`等、大文字）をそのまま永続化するため詳細設計書2章のDB格納値（`'Admin'`/`'Developer'`/`'Operator'`、title case、`CHECK`制約と同値）と食い違うが、本コンバータにより格納値をtitle caseへ統一し、CHECK制約・6.1章の最終有効Admin計数クエリ・7.2章のAPIレスポンス表現との整合を確保する。`@Converter(autoApply = true)`により`User.role`へ暗黙適用されるため、エンティティ側は`@Convert(converter = RoleConverter.class)`（2.1節）で明示指定する（可読性のため）。
+
+SOLID: S（`Role`⇄DB表現の変換のみを責務とする）。D（domainの`Role`型を変更せずにinfrastructure側で永続表現を差し替え可能にする）。
+
 ```mermaid
 classDiagram
     class UserRepository {
@@ -883,10 +923,15 @@ classDiagram
     class RefreshTokenStoreSessionRevoker {
         +purgeUser(UUID) void
     }
+    class RoleConverter {
+        +convertToDatabaseColumn(Role) String
+        +convertToEntityAttribute(String) Role
+    }
     class RefreshTokenStore_F01["RefreshTokenStore（F-01, auth.domain.port）"] {
         <<interface>>
     }
 
+    UserJpaRepositoryAdapter --> RoleConverter : User.roleの永続変換に利用
     UserRepository <|.. UserJpaRepositoryAdapter : implements（依存性逆転）
     PasswordHasher <|.. BcryptPasswordHasher : implements（依存性逆転）
     PasswordGenerator <|.. SecureRandomPasswordGenerator : implements（依存性逆転）
@@ -997,19 +1042,19 @@ public class UserController {
 public class UserResponseMapper {
 
     public UserResponse toDetail(User user) {
-        // id/email/role/enabled/created_at/updated_at/disabled_at のみ（password_hashを含めない）
+        // id/email/role(user.getRole().toExternal())/enabled/created_at/updated_at/disabled_at のみ（password_hashを含めない）
     }
 
     public UserSummaryResponse toSummary(User user) {
-        // id/email/role/enabled/created_at のみ
+        // id/email/role(toExternal())/enabled/created_at のみ
     }
 
     public MeResponse toMe(User user) {
-        // id/email/role/enabled のみ
+        // id/email/role(toExternal())/enabled のみ
     }
 
     public CreatedUserResponse toCreated(CreatedUser created) {
-        // id/email/role/enabled/initial_password（一度のみ）
+        // id/email/role(toExternal())/enabled/initial_password（一度のみ）
     }
 
     public UserListResponse toList(PageResult<User> pageResult) {
@@ -1017,6 +1062,8 @@ public class UserResponseMapper {
     }
 }
 ```
+
+`role`は`Role.name()`ではなく`Role.toExternal()`（2.2節）でtitle-case文字列へ変換する。これにより詳細設計書のAPIレスポンス例（`"role": "Developer"`）と一致させ、DB格納値（`RoleConverter`経由）・API表現の双方をtitle-caseへ統一する。
 
 SOLID: S（domain `User`からレスポンスDTOへの変換のみを責務とし、`password_hash`をいかなる変換先にも含めない単一防御箇所とする）。
 
@@ -1219,8 +1266,18 @@ sequenceDiagram
     CS->>TX: disable(targetId, actorId)（新規Tx開始）
     TX->>R: findById(targetId)
     alt 既にenabled=false
-        TX-->>CS: false（no-op、監査非発火）
-        CS-->>C: 200 OK（purge非発火）
+        TX-->>CS: false（no-op、DB更新・監査は非発火）
+        CS->>SR: purgeUser(targetId)（no-op時も再試行として実行。詳細設計書10.1の503後Admin再実行による回復フローに対応）
+        SR->>F01: purgeUser(targetId)
+        alt Redis到達可能
+            F01-->>SR: 成功
+            SR-->>CS: 成功
+            CS-->>C: 200 OK
+        else Redis不通
+            F01-->>SR: 失敗
+            SR-->>CS: SessionPurgeFailedException
+            CS-->>C: 503 USER_SESSION_PURGE_FAILED（DB更新・監査はそもそも変化なし。再実行によりRT失効の完了のみを図る）
+        end
     else 無効化対象
         TX->>P: ensureCanDisable(actorId, target)
         alt 自己無効化
@@ -1251,7 +1308,7 @@ sequenceDiagram
     end
 ```
 
-`resetPassword`も同型のフローであり、`UserMutationTx.resetPassword`のコミット後に`UserCommandService`が必ず`sessionRevoker.purgeUser`を実行する点のみが異なる（`disable`は`true`返却時のみpurgeするが、`resetPassword`は無条件にpurgeする）。
+`resetPassword`も同型のフローであり、`UserMutationTx.resetPassword`のコミット後に`UserCommandService`が必ず`sessionRevoker.purgeUser`を実行する点のみが異なる（`disable`・`resetPassword`いずれも、`UserMutationTx`側の戻り値・no-op判定に関わらず`purgeUser`を無条件に実行する）。
 
 ### 10.3 F-01との境界
 
@@ -1266,13 +1323,13 @@ sequenceDiagram
 | レイヤ | 方針 |
 | ------ | ---- |
 | `domain.model`（`User`） | Spring非依存の純粋単体テスト。`create`/`applyEmail`/`applyRole`のno-op検出（`boolean`戻り値）、`disable`/`enable`の`disabledAt`整合、`resetPassword`後に平文が一切保持されないことを検証する。 |
-| `domain.model`（`Role`） | `fromExternal`の正常系・enum外値での`InvalidRoleException`送出、`authority()`の`"ROLE_"`プレフィックス付与を検証する。 |
+| `domain.model`（`Role`） | `fromExternal`の正常系・enum外値での`InvalidRoleException`送出、`authority()`の`"ROLE_"`プレフィックス付与、`toExternal()`がtitle-case（`Admin`/`Developer`/`Operator`）を返すことを検証する。 |
 | `domain.service`（`UserAdministrationPolicy`） | `UserRepository`をモック化し、自己変更禁止（`actorId==target.id`）と最終有効Admin保護（`countEnabledAdminsWithLock()==1`）の各分岐を検証する。 |
 | `application`（`UserMutationTx`） | `UserRepository`/`PasswordHasher`/`PasswordGenerator`/`UserIdGenerator`/`Clock`/`UserAdministrationPolicy`/`AuditService`/`UserAuditDetailFactory`をすべてモック化し、各メソッドで`saveAndFlush`→`auditService.append`が同一呼出し内で発生すること、disable/enableのno-op時に監査が発火しないこと、`initialPassword`が戻り値のみに現れモック検証対象の引数（監査detail等）に一切含まれないことを検証する。 |
-| `application`（`UserCommandService`） | `UserMutationTx`/`SessionRevoker`をモック化し、`disable`が`true`返却時のみ`purgeUser`を呼ぶこと、`resetPassword`が常に`purgeUser`を呼ぶこと、`purgeUser`が`SessionPurgeFailedException`を送出した場合にそのまま伝播すること（DB系例外とは独立して扱われること）を検証する。 |
+| `application`（`UserCommandService`） | `UserMutationTx`/`SessionRevoker`をモック化し、`disable`は`userMutationTx.disable()`の戻り値（`true`/`false`）に関わらず常に`purgeUser`を呼ぶこと（no-op再実行時のRT失効回復を保証）、`resetPassword`が常に`purgeUser`を呼ぶこと、`purgeUser`が`SessionPurgeFailedException`を送出した場合にそのまま伝播すること（DB系例外とは独立して扱われること）を検証する。 |
 | `application`（`UserQueryService`） | `UserRepository`をモック化し、`get`/`getMyProfile`の`UserNotFoundException`送出、`list`の委譲を検証する。 |
 | `application`（`UserAuditDetailFactory`） | 各`forXxx`メソッドの返却Mapに`password`/`initial_password`等の機密キーが一切含まれないことをアサーションで検証する。 |
-| `infrastructure.persistence`（`UserJpaRepositoryAdapter`） | `@DataJpaTest`でemail重複時の`DataIntegrityViolationException`→`EmailConflictException`変換、`countEnabledAdminsWithLock`の悲観ロック（同時実行時の直列化）、`search`のフィルタ・ページングを検証する。 |
+| `infrastructure.persistence`（`UserJpaRepositoryAdapter`） | `@DataJpaTest`でemail重複時の`DataIntegrityViolationException`→`EmailConflictException`変換、`countEnabledAdminsWithLock`の行ロック（`findEnabledAdminIdsForUpdate`による同時実行時の直列化）、`RoleConverter`によるDB格納値（`'Admin'`/`'Developer'`/`'Operator'`）とCHECK制約の整合、`search`のフィルタ・ページングを検証する。 |
 | `infrastructure.security`（`BcryptPasswordHasher`/`SecureRandomPasswordGenerator`/`UuidUserIdGenerator`） | `hash`のbcrypt形式検証、`generate`の24文字長・文字種、`newId`のUUID形式を検証する。 |
 | `infrastructure.session`（`RefreshTokenStoreSessionRevoker`） | F-01 `RefreshTokenStore`をモック化し、正常委譲と、Redis由来例外の`SessionPurgeFailedException`への変換を検証する。 |
 | `presentation`（`UserController`） | `MockMvc`（`@WebMvcTest`＋`UserCommandService`/`UserQueryService`モック）で8エンドポイントのHTTPステータス、`actorId`が常に`Authentication`から解決されリクエストパラメータが採用されないこと（IDOR回帰防止）、`UpdateUserRequest`に`enabled`/`id`フィールドが存在せず受理されないことを検証する。 |
