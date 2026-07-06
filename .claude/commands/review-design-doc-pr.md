@@ -1,5 +1,5 @@
 ---
-description: 設計ドキュメントPR（docs/design/*.md）をレビューし、GitHub PRにインラインコメントを投稿する
+description: 設計ドキュメントPR（docs/design/**/*.md）をレビューし、GitHub PRにインラインコメントを投稿する
 argument-hint: [PR番号（省略時は現在のブランチのPR）]
 ---
 

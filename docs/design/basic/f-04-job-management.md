@@ -5,7 +5,7 @@
 | 版   | 日付       | 変更内容                     |
 | ---- | ---------- | ---------------------------- |
 | v0.1 | 2026-07-05 | 初版（design-doc-planner のプランを正式設計書に展開） |
-| v0.2 | 2026-07-05 | F-05設計書（`docs/design/f-05-audit-log.md`）の確定を反映。監査ログ追記を「DBコミット成功後」から業務操作と同一Txへ変更（確定事項D準拠、9.1・11章）。`JOB_*`アクション語彙・`detail`形式・実行完了を監査対象外とする方針（確定事項B）のF-05整合を確定しOPENを解消（16章） |
+| v0.2 | 2026-07-05 | F-05設計書（`docs/design/basic/f-05-audit-log.md`）の確定を反映。監査ログ追記を「DBコミット成功後」から業務操作と同一Txへ変更（確定事項D準拠、9.1・11章）。`JOB_*`アクション語彙・`detail`形式・実行完了を監査対象外とする方針（確定事項B）のF-05整合を確定しOPENを解消（16章） |
 
 ## 1. 目的・スコープ境界
 
@@ -22,7 +22,7 @@
 
 参照要件: `docs/requirements.md` 4.4（ジョブ管理）、5章 S-05（ジョブ一覧・詳細画面）、6章（データモデル）、7章（API設計方針）、10.2（性能）、10.4（ログ・監査）。
 
-ロールはF-02準拠でAdmin/Developer/Operatorの3種に固定する。本機能へは**3ロールすべてがアクセス可能**とする（`docs/design/f-01-jwt-auth.md` 8章 L118「`/api/v1/jobs`系 | ADMIN, DEVELOPER, OPERATOR」、`docs/requirements.md` 5章 S-05と整合）。`docs/design/f-03-api-management.md`ではOperatorのアクセスを不可としているが、本機能はOperatorが正規のユースケース（実行状況の監視・履歴確認・手動実行）を持つため、F-03とは逆にOperatorを許可する点に注意すること（詳細は「7. 認可・所有権モデル」参照）。
+ロールはF-02準拠でAdmin/Developer/Operatorの3種に固定する。本機能へは**3ロールすべてがアクセス可能**とする（`docs/design/basic/f-01-jwt-auth.md` 8章 L118「`/api/v1/jobs`系 | ADMIN, DEVELOPER, OPERATOR」、`docs/requirements.md` 5章 S-05と整合）。`docs/design/basic/f-03-api-management.md`ではOperatorのアクセスを不可としているが、本機能はOperatorが正規のユースケース（実行状況の監視・履歴確認・手動実行）を持つため、F-03とは逆にOperatorを許可する点に注意すること（詳細は「7. 認可・所有権モデル」参照）。
 
 ## 2. 用語
 
@@ -57,7 +57,7 @@
 | type | 通常インデックス | 一覧APIの`type`フィルタを高速化する |
 | deleted_at | 部分インデックス（`WHERE deleted_at IS NULL`） | 有効なジョブのみを対象とした一覧・検索の高速化 |
 
-削除方式はソフト削除（`deleted_at`）に固定し、ハード削除は提供しない。これは`docs/design/f-02-user-role-management.md`・`docs/design/f-03-api-management.md`と同様の方針であり、`job_executions`および`AUDIT_LOG.target_id`の参照整合性・監査証跡を保持するためである。
+削除方式はソフト削除（`deleted_at`）に固定し、ハード削除は提供しない。これは`docs/design/basic/f-02-user-role-management.md`・`docs/design/basic/f-03-api-management.md`と同様の方針であり、`job_executions`および`AUDIT_LOG.target_id`の参照整合性・監査証跡を保持するためである。
 
 `name`のUNIQUE制約は`deleted_at IS NULL`の部分インデックスとする（全行対象の単純UNIQUEにはしない）。ソフト削除済みのレコードは一意性判定から除外されるため、削除済みと同名のジョブを新規作成できる。これにより、削除済みレコードが永久に名称を占有し続ける事態を避ける。
 
@@ -179,13 +179,13 @@ MVPで同梱するハンドラは、最小限の安全なもの（例: `sample.e
 
 ## 7. 認可・所有権モデル
 
-認可基盤は`docs/design/f-01-jwt-auth.md` 8章のRBAC実装（`@PreAuthorize("hasRole(...)")`）をそのまま踏襲する。
+認可基盤は`docs/design/basic/f-01-jwt-auth.md` 8章のRBAC実装（`@PreAuthorize("hasRole(...)")`）をそのまま踏襲する。
 
-`/api/v1/jobs`系のすべてのエンドポイントはADMIN・DEVELOPER・OPERATORの全ロールに許可する（`docs/requirements.md` 5章 S-05、`docs/design/f-01-jwt-auth.md` 8章 L118と整合）。`jobs`テーブルには`owner_id`に相当するカラムはER図上存在せず、要件上も所有制約はない。したがってジョブは組織横断の資産として扱い、全ロールが実行トリガー（EP6）を含む読取・実行系操作を行える（Operatorによる実行トリガーは要件上の正規ユースケースである）。
+`/api/v1/jobs`系のすべてのエンドポイントはADMIN・DEVELOPER・OPERATORの全ロールに許可する（`docs/requirements.md` 5章 S-05、`docs/design/basic/f-01-jwt-auth.md` 8章 L118と整合）。`jobs`テーブルには`owner_id`に相当するカラムはER図上存在せず、要件上も所有制約はない。したがってジョブは組織横断の資産として扱い、全ロールが実行トリガー（EP6）を含む読取・実行系操作を行える（Operatorによる実行トリガーは要件上の正規ユースケースである）。
 
-一方、破壊的な書込系（EP4更新・EP5削除）についてはdefensiveな設計として、「creator（`created_by == actor.sub`）またはADMIN」に限定する（`docs/design/f-03-api-management.md`の所有権モデルに準じた方針）。creator本人でもADMINでもない実行者が更新・削除を試みた場合は403 `JOB_NOT_OWNER`を返す。これは、他者が登録したジョブの無断改変・削除（例: パラメータを書き換えて意図しない処理を実行させる、他者の定型処理を勝手に削除する）を防ぐためである。
+一方、破壊的な書込系（EP4更新・EP5削除）についてはdefensiveな設計として、「creator（`created_by == actor.sub`）またはADMIN」に限定する（`docs/design/basic/f-03-api-management.md`の所有権モデルに準じた方針）。creator本人でもADMINでもない実行者が更新・削除を試みた場合は403 `JOB_NOT_OWNER`を返す。これは、他者が登録したジョブの無断改変・削除（例: パラメータを書き換えて意図しない処理を実行させる、他者の定型処理を勝手に削除する）を防ぐためである。
 
-実行者（actor）の特定は、検証済みアクセストークンの`sub`クレームのみを用い、DBへの再照会は行わない（`docs/design/f-01-jwt-auth.md` 9.3節SEQ_verifyと整合）。
+実行者（actor）の特定は、検証済みアクセストークンの`sub`クレームのみを用い、DBへの再照会は行わない（`docs/design/basic/f-01-jwt-auth.md` 9.3節SEQ_verifyと整合）。
 
 `created_by`はEP2において常に実行者（`actor.sub`）で固定し、リクエストボディでの指定は受け付けない（mass-assignment防止）。
 
@@ -314,10 +314,10 @@ sequenceDiagram
 | JOB_NOT_OWNER | 403 | creator本人でもADMINでもない実行者によるEP4（更新）・EP5（削除）の試行 |
 | JOB_EXECUTION_NOT_FOUND | 404 | 指定された実行IDが存在しない、または`job_id`がパスの`{id}`と一致しない |
 | JOB_EXECUTION_IN_PROGRESS | 409 | 対象ジョブに既にアクティブな実行（`PENDING`/`RUNNING`）が存在する状態でのEP6呼び出し（部分UNIQUE違反をハンドリング） |
-| AUTH_UNAUTHENTICATED | 401 | 未認証（`docs/design/f-01-jwt-auth.md`のコードを再利用） |
+| AUTH_UNAUTHENTICATED | 401 | 未認証（`docs/design/basic/f-01-jwt-auth.md`のコードを再利用） |
 | AUTH_FORBIDDEN | 403 | ロール不足による認可失敗。ただしOperatorは本機能（`/api/v1/jobs`系）では許可ロールに含まれるため、この経路には該当しない |
 
-`docs/design/f-03-api-management.md`のAPIキー失効のような「二重失効」に相当する冪等no-opケースは、本機能には該当しない（EP6のsingle-flight違反は409エラーとして扱い、no-opにはしない。「8. 実行ライフサイクル・状態遷移」参照）。レスポンスボディは`docs/requirements.md` 7章および`docs/design/f-01-jwt-auth.md` 10章と同様に`{code, message, details}`形式で統一する。
+`docs/design/basic/f-03-api-management.md`のAPIキー失効のような「二重失効」に相当する冪等no-opケースは、本機能には該当しない（EP6のsingle-flight違反は409エラーとして扱い、no-opにはしない。「8. 実行ライフサイクル・状態遷移」参照）。レスポンスボディは`docs/requirements.md` 7章および`docs/design/basic/f-01-jwt-auth.md` 10章と同様に`{code, message, details}`形式で統一する。
 
 ## 11. 監査ログ（F-05連携）
 
@@ -338,9 +338,9 @@ F-05が提供する`AUDIT_LOG`テーブル（`actor_id`, `action`, `target_type`
 
 実行の完了（`SUCCEEDED`/`FAILED`/`TIMED_OUT`への遷移）は、pollerやreconcilerといったシステムが自律的に行うイベントであり、人間のactorが存在しない。このため、実行完了自体はAUDIT_LOGには記録せず、`job_executions.status`の遷移で追跡する方針とする。`docs/requirements.md` 4.4「ジョブの登録・実行は監査ログに記録される」の「実行」は、EP6によるトリガー記録（`JOB_EXECUTION_TRIGGERED`）をもって充足するものと解釈する。
 
-監査ログへの追記は、業務操作のDB更新と**同一DBトランザクション内**で行い、業務コミットと監査挿入の原子性を保証する（`docs/design/f-05-audit-log.md` 7章 確定事項D準拠。「業務操作は成功したが監査ログに記録されていない」という証跡欠落を排除する）。監査ログは追記のみとし、UI/APIからの更新・削除経路は持たない（`docs/requirements.md` 4.5・10.4「改ざん防止」準拠）。
+監査ログへの追記は、業務操作のDB更新と**同一DBトランザクション内**で行い、業務コミットと監査挿入の原子性を保証する（`docs/design/basic/f-05-audit-log.md` 7章 確定事項D準拠。「業務操作は成功したが監査ログに記録されていない」という証跡欠落を排除する）。監査ログは追記のみとし、UI/APIからの更新・削除経路は持たない（`docs/requirements.md` 4.5・10.4「改ざん防止」準拠）。
 
-本章で定義した`JOB_*`アクション語彙・`detail`形式はF-05側のaction語彙レジストリ（`docs/design/f-05-audit-log.md` 4章）にcanonical（正典）として採録され、実行完了（`SUCCEEDED`/`FAILED`/`TIMED_OUT`への遷移）を監査対象外とする前段の方針も同章の確定事項Bとして承認済みであり、いずれも整合確認済みである。
+本章で定義した`JOB_*`アクション語彙・`detail`形式はF-05側のaction語彙レジストリ（`docs/design/basic/f-05-audit-log.md` 4章）にcanonical（正典）として採録され、実行完了（`SUCCEEDED`/`FAILED`/`TIMED_OUT`への遷移）を監査対象外とする前段の方針も同章の確定事項Bとして承認済みであり、いずれも整合確認済みである。
 
 ## 12. セキュリティ制御
 
@@ -405,6 +405,6 @@ Phase1（MVP）における明確な非対応事項は以下の通り。
 3. **`parameters`／`log_excerpt`内の機密自動redactの具体ルール**: 機密情報を自動検出・マスキングするための具体的なルール（キー名パターンのマッチング方式等）は未確定である（「12. セキュリティ制御」参照）。
 4. **実行完了通知**: Slack等への実行完了通知はPhase2の通知基盤に依存するため、本書の対象外である（`docs/requirements.md` 3.2）。
 
-（F-05監査ログスキーマとの最終整合確認については、`JOB_*`アクション語彙・`detail`形式が`docs/design/f-05-audit-log.md` 4章のaction語彙レジストリにcanonicalとして採録され、実行完了を監査対象外とする方針も同章の確定事項Bとして承認、追記方式も同7章 確定事項D「業務操作と同一Tx」に改めたことで解消済みのため本節から削除した。「11. 監査ログ（F-05連携）」参照。）
+（F-05監査ログスキーマとの最終整合確認については、`JOB_*`アクション語彙・`detail`形式が`docs/design/basic/f-05-audit-log.md` 4章のaction語彙レジストリにcanonicalとして採録され、実行完了を監査対象外とする方針も同章の確定事項Bとして承認、追記方式も同7章 確定事項D「業務操作と同一Tx」に改めたことで解消済みのため本節から削除した。「11. 監査ログ（F-05連携）」参照。）
 
 **再掲・絶対制約**: 任意のコード・シェルコマンド・ユーザー指定URLの実行は一切不可（`type`はハンドラレジストリに限定）。`parameters`・`log_excerpt`・監査ログの`detail`にシークレット・トークン・パスワードを出力しない。監査ログは追記のみで更新・削除経路を持たない。OperatorはF-04（`/api/v1/jobs`系）にアクセス可能（F-03とは逆の扱い）。実行トリガー（EP6）は非同期202を返し、長時間処理はAPIレスポンスの範囲外で行う。cron・実行キャンセル・外部キュー基盤はMVP対象外。

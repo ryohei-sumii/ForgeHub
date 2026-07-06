@@ -6,7 +6,7 @@
 | ---- | ---------- | ---------------------------- |
 | v0.1 | 2026-07-04 | 初版（design-doc-planner のプランを正式設計書に展開） |
 | v0.2 | 2026-07-04 | design-doc-reviewerの指摘を反映。`name`一意制約をソフト削除対応の部分UNIQUEに変更、EP4のowner再割当に対象ユーザーの役割・有効状態検証を追加（3章・5章・9章・13章）。あわせて`docs/requirements.md`側のAPIキー発行/失効の認可を所有者限定に修正し本書と整合させた |
-| v0.3 | 2026-07-05 | F-05設計書（`docs/design/f-05-audit-log.md`）の確定を反映。監査ログ追記を「DBコミット成功後」から業務操作と同一Txへ変更（確定事項D準拠、8章・10章）。`API_DEFINITION_*`/`API_KEY_*`アクション語彙・`detail`形式のF-05整合を確定しOPENを解消（15章） |
+| v0.3 | 2026-07-05 | F-05設計書（`docs/design/basic/f-05-audit-log.md`）の確定を反映。監査ログ追記を「DBコミット成功後」から業務操作と同一Txへ変更（確定事項D準拠、8章・10章）。`API_DEFINITION_*`/`API_KEY_*`アクション語彙・`detail`形式のF-05整合を確定しOPENを解消（15章） |
 
 ## 1. 目的・スコープ境界
 
@@ -16,12 +16,12 @@
 
 | 項目 | 対象外とする理由 |
 | ---- | ---------------- |
-| APIキーによる外部呼び出しの実行時認証（ゲートウェイ／検証） | `docs/design/f-01-jwt-auth.md` 15章「APIキー認証（F-03）」に「JWTとは別系統の認証方式であり、本書のスコープ外」と明記されており、`docs/requirements.md` 4.3の受け入れ条件にも検証要件の記載がない。格納設計（`key_hash`のUNIQUE index等）は将来対応を見据えて用意するが、検証経路自体はPhase2で設計する（※本項目は未決。詳細は末尾「15. 未決事項」参照）。 |
+| APIキーによる外部呼び出しの実行時認証（ゲートウェイ／検証） | `docs/design/basic/f-01-jwt-auth.md` 15章「APIキー認証（F-03）」に「JWTとは別系統の認証方式であり、本書のスコープ外」と明記されており、`docs/requirements.md` 4.3の受け入れ条件にも検証要件の記載がない。格納設計（`key_hash`のUNIQUE index等）は将来対応を見据えて用意するが、検証経路自体はPhase2で設計する（※本項目は未決。詳細は末尾「15. 未決事項」参照）。 |
 | Webhook管理・GitHub連携 | `docs/requirements.md` 3.2でPhase2以降と明記されている。 |
 
 参照要件: `docs/requirements.md` 4.3（API管理）、5章 S-04（API一覧・詳細画面）、6章（データモデル）、7章（API設計方針）、10.1・10.4（セキュリティ・ログ監査）。
 
-ロールはF-02準拠でAdmin/Developer/Operatorの3種に固定する。本機能へアクセス可能なのはAdminとDeveloperのみであり、Operatorはアクセス不可とする（`docs/requirements.md` 5章 S-04、`docs/design/f-01-jwt-auth.md` 8章 L117と整合。詳細は「6. 認可・所有権モデル」参照）。
+ロールはF-02準拠でAdmin/Developer/Operatorの3種に固定する。本機能へアクセス可能なのはAdminとDeveloperのみであり、Operatorはアクセス不可とする（`docs/requirements.md` 5章 S-04、`docs/design/basic/f-01-jwt-auth.md` 8章 L117と整合。詳細は「6. 認可・所有権モデル」参照）。
 
 ## 2. 用語
 
@@ -55,7 +55,7 @@
 | owner_id | 通常インデックス | 一覧APIの`owner_id`フィルタおよびJOIN高速化 |
 | deleted_at | 部分インデックス（`WHERE deleted_at IS NULL`） | 有効なAPI定義のみを対象とした一覧・検索の高速化 |
 
-削除方式はソフト削除（`deleted_at`）に固定し、ハード削除は提供しない。これは`docs/design/f-02-user-role-management.md`が採用する方針と同様、`AUDIT_LOG.target_id`の参照整合性および監査証跡を保持するためである。
+削除方式はソフト削除（`deleted_at`）に固定し、ハード削除は提供しない。これは`docs/design/basic/f-02-user-role-management.md`が採用する方針と同様、`AUDIT_LOG.target_id`の参照整合性および監査証跡を保持するためである。
 
 `name`のUNIQUE制約は`deleted_at IS NULL`の部分インデックスとする（全行対象の単純UNIQUEにはしない）。ソフト削除済みのレコードは一意性判定から除外されるため、削除済みと同名のAPI定義を新規作成（EP2）できる。これにより、削除済みレコードが永久に名称を占有し続ける（削除済みと同名では二度と作成できなくなる）事態を避ける。
 
@@ -150,13 +150,13 @@ APIキーのメタ情報一覧を返す。レスポンス項目は`{id, key_pref
 
 ## 6. 認可・所有権モデル
 
-認可基盤は`docs/design/f-01-jwt-auth.md` 8章のRBAC実装（`@PreAuthorize("hasRole(...)")`）をそのまま踏襲する。`/api/v1/apis`系のすべてのエンドポイントはADMINまたはDEVELOPERロールに限定し、**Operatorはアクセス不可**とする（`docs/requirements.md` 5章 S-04、`docs/design/f-01-jwt-auth.md` 8章 L117と整合。※本制約は絶対制約であり、Phase2以降でも変更予定はない）。
+認可基盤は`docs/design/basic/f-01-jwt-auth.md` 8章のRBAC実装（`@PreAuthorize("hasRole(...)")`）をそのまま踏襲する。`/api/v1/apis`系のすべてのエンドポイントはADMINまたはDEVELOPERロールに限定し、**Operatorはアクセス不可**とする（`docs/requirements.md` 5章 S-04、`docs/design/basic/f-01-jwt-auth.md` 8章 L117と整合。※本制約は絶対制約であり、Phase2以降でも変更予定はない）。
 
 読取系（EP1・EP3・EP6）はADMIN・DEVELOPERであれば全件参照可能とする。所有者に限定しないのは、社内APIの仕様は組織横断で参照できる必要があるためである。
 
 書込系（EP4・EP5・EP7・EP8）は「`owner_id == actor.sub` またはADMIN」に限定する（所有権モデル）。所有者本人でもADMINでもない実行者が書込を試みた場合は403（`API_NOT_OWNER`）を返す。
 
-実行者（actor）の特定は、検証済みアクセストークンの`sub`クレームのみを用い、DBへの再照会は行わない（`docs/design/f-01-jwt-auth.md` 9.3節SEQ_verifyと整合）。
+実行者（actor）の特定は、検証済みアクセストークンの`sub`クレームのみを用い、DBへの再照会は行わない（`docs/design/basic/f-01-jwt-auth.md` 9.3節SEQ_verifyと整合）。
 
 owner再割当（`owner_id`の変更）はEP4においてADMIN限定のホワイトリストフィールドとして提供する。owner本人であってもこのフィールドを変更することはできない（「5. API仕様」EP4参照）。
 
@@ -273,10 +273,10 @@ sequenceDiagram
 | API_INVALID_OWNER | 400 | EP4の`owner_id`再割当で、割当先が`role IN ('Admin','Developer')`かつ`enabled=true`を満たさない場合 |
 | API_KEY_INVALID_EXPIRY | 400 | `expires_at`が過去日、または365日を超える指定 |
 | API_VALIDATION_ERROR | 400 | 必須フィールドの欠落、または形式不正 |
-| AUTH_UNAUTHENTICATED | 401 | 未認証（`docs/design/f-01-jwt-auth.md`のコードを再利用） |
-| AUTH_FORBIDDEN | 403 | ロール不足による認可失敗（Operatorのアクセス試行を含む。`docs/design/f-01-jwt-auth.md`のコードを再利用） |
+| AUTH_UNAUTHENTICATED | 401 | 未認証（`docs/design/basic/f-01-jwt-auth.md`のコードを再利用） |
+| AUTH_FORBIDDEN | 403 | ロール不足による認可失敗（Operatorのアクセス試行を含む。`docs/design/basic/f-01-jwt-auth.md`のコードを再利用） |
 
-二重失効（既に失効済みのAPIキーへの失効リクエスト）はエラーではなく204（冪等）として扱う（「7. APIキーライフサイクル」参照）。レスポンスボディは`docs/requirements.md` 7章および`docs/design/f-01-jwt-auth.md` 10章と同様に`{code, message, details}`形式で統一する。
+二重失効（既に失効済みのAPIキーへの失効リクエスト）はエラーではなく204（冪等）として扱う（「7. APIキーライフサイクル」参照）。レスポンスボディは`docs/requirements.md` 7章および`docs/design/basic/f-01-jwt-auth.md` 10章と同様に`{code, message, details}`形式で統一する。
 
 ## 10. 監査ログ（F-05連携）
 
@@ -296,10 +296,10 @@ F-05が提供する`AUDIT_LOG`テーブル（`actor_id`, `action`, `target_type`
 - `target_id`には対象（API定義またはAPIキー）のIDを記録する。
 - `detail`には`name`・`endpoint`・`owner_id`・`expires_at`・`key_prefix`・`revoked_key_count`（EP5でのカスケード失効件数）等の**非機密情報のみ**を記録する。
 - **平文APIキー・`key_hash`は、いかなる形式であっても`detail`に一切含めない。** これは本書における絶対制約であり、「11. セキュリティ制御」でも重複して明記する。
-- 監査ログへの追記は、業務操作のDB更新と**同一DBトランザクション内**で行い、業務コミットと監査挿入の原子性を保証する（`docs/design/f-05-audit-log.md` 7章 確定事項D準拠。「業務操作は成功したが監査ログに記録されていない」という証跡欠落を排除する）。
+- 監査ログへの追記は、業務操作のDB更新と**同一DBトランザクション内**で行い、業務コミットと監査挿入の原子性を保証する（`docs/design/basic/f-05-audit-log.md` 7章 確定事項D準拠。「業務操作は成功したが監査ログに記録されていない」という証跡欠落を排除する）。
 - 監査ログは追記のみとし、UI/APIからの更新・削除経路は持たない（`docs/requirements.md` 4.5・10.4「改ざん防止」準拠）。
 
-本章で定義した`API_DEFINITION_*`/`API_KEY_*`アクション語彙および`detail`形式は、F-05側のaction語彙レジストリ（`docs/design/f-05-audit-log.md` 4章）にcanonical（正典）として採録され、整合確認済みである。
+本章で定義した`API_DEFINITION_*`/`API_KEY_*`アクション語彙および`detail`形式は、F-05側のaction語彙レジストリ（`docs/design/basic/f-05-audit-log.md` 4章）にcanonical（正典）として採録され、整合確認済みである。
 
 ## 11. セキュリティ制御
 
@@ -359,7 +359,7 @@ Phase1（MVP）における明確な非対応事項は以下の通り。
 2. **owner無効化時のAPI/APIキーの扱い**: F-02のユーザー無効化（disable）が発生した場合、当該ユーザーがownerであるAPI定義・発行者であるAPIキーを自動的に失効させるか、レコードをそのまま保持しAdminによる再割当（EP4の`owner_id`変更）に委ねるかは未決である。現案は後者（レコード保持＋Admin再割当）だが、自動失効ポリシーの採否は要検討である（「14. スコープ境界」参照）。
 3. **`endpoint`の重複許容・形式バリデーションの厳密仕様**: 複数のAPI定義が同一`endpoint`を指すことを許容するか、また`endpoint`をURL形式として厳密にバリデーションするかパス表記も許容するかについては、本書では確定していない。
 
-（F-05監査ログスキーマとの最終整合確認については、`API_DEFINITION_*`/`API_KEY_*`アクション語彙・`detail`形式が`docs/design/f-05-audit-log.md` 4章のaction語彙レジストリにcanonicalとして採録され、追記方式も同7章 確定事項D「業務操作と同一Tx」に改めたことで解消済みのため本節から削除した。「10. 監査ログ（F-05連携）」参照。）
+（F-05監査ログスキーマとの最終整合確認については、`API_DEFINITION_*`/`API_KEY_*`アクション語彙・`detail`形式が`docs/design/basic/f-05-audit-log.md` 4章のaction語彙レジストリにcanonicalとして採録され、追記方式も同7章 確定事項D「業務操作と同一Tx」に改めたことで解消済みのため本節から削除した。「10. 監査ログ（F-05連携）」参照。）
 
 **再掲・絶対制約**: 平文APIキーは発行レスポンスで一度だけ返却し、以降は再表示不可（監査ログ`detail`・アプリケーションログ・例外メッセージへの出力も禁止）。APIキーはSHA-256ハッシュのみを保存し平文を保持しない。監査ログは追記のみで更新・削除経路を持たない。OperatorはF-03（`/api/v1/apis`系）にアクセス不可。APIキーの実行時認証（外部呼び出しの検証）はMVP対象外。
 </content>
