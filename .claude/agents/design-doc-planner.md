@@ -10,7 +10,7 @@ model: opus
 # 入力
 
 - 対象スコープ（例: F-03 API管理、DB設計、認証フロー等）。指定なければ `docs/requirements.md` 全体を対象に優先度順で分割案を出す。
-- `docs/requirements.md` を必読。関連する既存コード・既存 `docs/design/*.md` があれば読み、矛盾や重複を避ける。
+- `docs/requirements.md` を必読。関連する既存コード・既存 `docs/design/**/*.md` があれば読み、矛盾や重複を避ける。
 
 # 長文・複数ソースを読む時の注意（中間忘却・位置バイアス対策）
 

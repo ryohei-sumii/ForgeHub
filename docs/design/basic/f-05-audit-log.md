@@ -53,7 +53,7 @@
 | request_id | varchar | NULLABLE。`docs/requirements.md` 10.4「構造化ログはリクエストIDで追跡可能にする」との相関を取るための追加カラム。 |
 | created_at | timestamptz | NOT NULL、デフォルト`now()` |
 
-`actor_id`のFK整合性は、`docs/design/f-02-user-role-management.md` 1章が定める「ユーザーのハード削除は行わずソフト無効化（`enabled=false`）のみを提供する」という方針により恒久的に担保される。ユーザーが物理削除されることがないため、`AUDIT_LOG.actor_id`が指す先が消失することはない。
+`actor_id`のFK整合性は、`docs/design/basic/f-02-user-role-management.md` 1章が定める「ユーザーのハード削除は行わずソフト無効化（`enabled=false`）のみを提供する」という方針により恒久的に担保される。ユーザーが物理削除されることがないため、`AUDIT_LOG.actor_id`が指す先が消失することはない。
 
 いずれのカラムもINSERT時にのみ設定され、UPDATEされる経路は存在しない（「8. 不変性・改ざん防止強制」参照）。
 
@@ -79,23 +79,23 @@ erDiagram
 
 | グループ | action | target_type | 出典（元設計） |
 | -------- | ------ | ----------- | -------------- |
-| AUTH | LOGIN_SUCCESS | USER（`target_id`=user.id） | `docs/design/f-01-jwt-auth.md` 14章 |
+| AUTH | LOGIN_SUCCESS | USER（`target_id`=user.id） | `docs/design/basic/f-01-jwt-auth.md` 14章 |
 | AUTH | LOGIN_FAILURE | USER（`target_id`=user.id または`null`） | 同上 |
 | AUTH | LOGOUT | USER | 同上 |
 | AUTH | TOKEN_REFRESH | USER | 同上 |
 | AUTH | REFRESH_REUSE_DETECTED | USER | 同上 |
-| USER | USER_CREATED | USER | `docs/design/f-02-user-role-management.md` 8章 |
+| USER | USER_CREATED | USER | `docs/design/basic/f-02-user-role-management.md` 8章 |
 | USER | USER_UPDATED | USER | 同上 |
 | USER | USER_ROLE_CHANGED | USER | 同上 |
 | USER | USER_DISABLED | USER | 同上 |
 | USER | USER_ENABLED | USER | 同上 |
 | USER | USER_PASSWORD_RESET | USER | 同上 |
-| API | API_DEFINITION_CREATED | API_DEFINITION | `docs/design/f-03-api-management.md` 10章 |
+| API | API_DEFINITION_CREATED | API_DEFINITION | `docs/design/basic/f-03-api-management.md` 10章 |
 | API | API_DEFINITION_UPDATED | API_DEFINITION | 同上 |
 | API | API_DEFINITION_DELETED | API_DEFINITION | 同上 |
 | API | API_KEY_ISSUED | API_KEY | 同上 |
 | API | API_KEY_REVOKED | API_KEY | 同上 |
-| JOB | JOB_CREATED | JOB | `docs/design/f-04-job-management.md` 11章 |
+| JOB | JOB_CREATED | JOB | `docs/design/basic/f-04-job-management.md` 11章 |
 | JOB | JOB_UPDATED | JOB | 同上 |
 | JOB | JOB_DELETED | JOB | 同上 |
 | JOB | JOB_EXECUTION_TRIGGERED | JOB_EXECUTION | 同上 |
@@ -105,7 +105,7 @@ erDiagram
 | action | `detail`形式 |
 | ------ | ------------ |
 | `USER_*`（USER_CREATED/UPDATED/ROLE_CHANGED/DISABLED/ENABLED/PASSWORD_RESET） | `{before, after}`。`role` / `email` / `enabled`の差分のみを記録する。 |
-| `API_DEFINITION_CREATED` / `API_DEFINITION_UPDATED` | `{name, endpoint, owner_id}`（`docs/design/f-03-api-management.md` 10章と整合） |
+| `API_DEFINITION_CREATED` / `API_DEFINITION_UPDATED` | `{name, endpoint, owner_id}`（`docs/design/basic/f-03-api-management.md` 10章と整合） |
 | `API_DEFINITION_DELETED` | `{revoked_key_count}`（カスケード失効したAPIキー件数） |
 | `API_KEY_ISSUED` / `API_KEY_REVOKED` | `{key_prefix, expires_at}` |
 | `JOB_*`（JOB_CREATED/UPDATED/DELETED） | `{name, type}` |
@@ -116,8 +116,8 @@ erDiagram
 
 本書は以下3点を確定事項として、F-01〜F-04のOPENを解消する。
 
-- **確定事項A**: `docs/requirements.md` 4.5の「主要な書き込み系操作（CUD、ジョブ実行）」に加えて、AUTH系5イベント（`LOGIN_SUCCESS`等）も監査対象に含める。これは`docs/design/f-01-jwt-auth.md`（v0.2時点の未決事項2）として提起されていた提案を、本書で承認・解消したものである。要件書側4.5の文言更新は反映済み（`docs/requirements.md` v0.4）。
-- **確定事項B**: ジョブ実行の完了（`SUCCEEDED`/`FAILED`/`TIMED_OUT`への遷移）は、poller/reconcilerが自律的に行うシステムイベントでありhuman actorが存在しないため、`AUDIT_LOG`には記録しない。`job_executions.status`の遷移履歴で追跡する。これは`docs/design/f-04-job-management.md` 11章の決定を本書で承認・解消するものである。
+- **確定事項A**: `docs/requirements.md` 4.5の「主要な書き込み系操作（CUD、ジョブ実行）」に加えて、AUTH系5イベント（`LOGIN_SUCCESS`等）も監査対象に含める。これは`docs/design/basic/f-01-jwt-auth.md`（v0.2時点の未決事項2）として提起されていた提案を、本書で承認・解消したものである。要件書側4.5の文言更新は反映済み（`docs/requirements.md` v0.4）。
+- **確定事項B**: ジョブ実行の完了（`SUCCEEDED`/`FAILED`/`TIMED_OUT`への遷移）は、poller/reconcilerが自律的に行うシステムイベントでありhuman actorが存在しないため、`AUDIT_LOG`には記録しない。`job_executions.status`の遷移履歴で追跡する。これは`docs/design/basic/f-04-job-management.md` 11章の決定を本書で承認・解消するものである。
 - **確定事項C**: actionの追加は本レジストリ（本章）への追記によってのみ許可する。feature側の実装が任意の文字列をactionとして送出することは、アプリケーション層の`AuditAction` enum検証によって拒否される。
 
 本章のcanonical定義は、F-01〜F-04の各設計書の改版（F-01 v0.3・F-02 v0.3・F-03 v0.3・F-04 v0.2）により同期済みである。
@@ -178,13 +178,13 @@ erDiagram
 
 ## 6. 認可
 
-認可基盤は`docs/design/f-01-jwt-auth.md` 8章のRBAC実装（`@PreAuthorize("hasRole(...)")`）をそのまま踏襲する。
+認可基盤は`docs/design/basic/f-01-jwt-auth.md` 8章のRBAC実装（`@PreAuthorize("hasRole(...)")`）をそのまま踏襲する。
 
-`/api/v1/audit-logs`系はADMIN・OPERATOR限定とする（`docs/requirements.md` 5章 S-06、`docs/design/f-01-jwt-auth.md` 8章 L119と整合）。**DEVELOPERは本機能へアクセス不可であり、アクセス試行は403（`AUTH_FORBIDDEN`）で拒否する。**
+`/api/v1/audit-logs`系はADMIN・OPERATOR限定とする（`docs/requirements.md` 5章 S-06、`docs/design/basic/f-01-jwt-auth.md` 8章 L119と整合）。**DEVELOPERは本機能へアクセス不可であり、アクセス試行は403（`AUTH_FORBIDDEN`）で拒否する。**
 
 F-03（owner限定の書込）やF-04（creator限定の書込）とは異なり、監査ログには所有スコープを設けない。ADMIN・OPERATORは全レコードを横断的に参照できる。これは監査の性質上（「誰が何をしたか」を横断的に把握できる必要がある）意図的な設計である。
 
-読取専用のAPIであるため、actorの特定は不要である。デフォルトdeny原則（`docs/design/f-01-jwt-auth.md` 8章 L123）も踏襲し、認可注釈のないエンドポイントは「認証済みであること」をデフォルト要求する。
+読取専用のAPIであるため、actorの特定は不要である。デフォルトdeny原則（`docs/design/basic/f-01-jwt-auth.md` 8章 L123）も踏襲し、認可注釈のないエンドポイントは「認証済みであること」をデフォルト要求する。
 
 ## 7. 追記経路・書込アーキテクチャ
 
@@ -202,7 +202,7 @@ F-01の`LOGIN_SUCCESS` / `LOGIN_FAILURE` / `LOGOUT` / `TOKEN_REFRESH` / `REFRESH
 
 ### 具体例: F-02 USER_DISABLED
 
-`docs/design/f-02-user-role-management.md` 10.1章の無効化フローでは、`users`テーブル更新（`enabled=false`）と監査ログ挿入（`USER_DISABLED`）を同一Txでコミットした後に、Redis上のRT一括削除（purge）を実行する。Redisが不通で503を返す場合でも、監査ログは既に確定済みである（DB更新と監査挿入が同一Txであるため）。
+`docs/design/basic/f-02-user-role-management.md` 10.1章の無効化フローでは、`users`テーブル更新（`enabled=false`）と監査ログ挿入（`USER_DISABLED`）を同一Txでコミットした後に、Redis上のRT一括削除（purge）を実行する。Redisが不通で503を返す場合でも、監査ログは既に確定済みである（DB更新と監査挿入が同一Txであるため）。
 
 `detail`は常にproducer側で非機密情報のみを組み立てて渡す。`AuditService`側でも二重防御として、`detail`に対する denylist ベースのstrip処理を行う（「12. セキュリティ制御」参照）。
 
@@ -301,8 +301,8 @@ sequenceDiagram
 | ------ | --------------- | -------- |
 | AUDIT_VALIDATION_ERROR | 400 | `action`/`target_type`がenum外、`target_id`/`actor_id`がuuid形式不正、`from > to`、`size`が範囲外 |
 | AUDIT_NOT_FOUND | 404 | EP2で指定した`id`が存在しない |
-| AUTH_FORBIDDEN | 403 | DEVELOPERまたはロール不足の実行者による`/audit-logs`アクセス試行（`docs/design/f-01-jwt-auth.md`のコードを再利用） |
-| AUTH_UNAUTHENTICATED | 401 | 未認証（`docs/design/f-01-jwt-auth.md`のコードを再利用） |
+| AUTH_FORBIDDEN | 403 | DEVELOPERまたはロール不足の実行者による`/audit-logs`アクセス試行（`docs/design/basic/f-01-jwt-auth.md`のコードを再利用） |
+| AUTH_UNAUTHENTICATED | 401 | 未認証（`docs/design/basic/f-01-jwt-auth.md`のコードを再利用） |
 
 レスポンスボディは`docs/requirements.md` 7章と同様に`{code, message, details}`形式で統一する。
 

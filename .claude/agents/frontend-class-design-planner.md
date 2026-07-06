@@ -1,6 +1,6 @@
 ---
 name: frontend-class-design-planner
-description: Plans the frontend (TypeScript/Next.js) module structure for a ForgeHub feature — domain-adherent directory layout, domain types, components, hooks, API client layer, with function/type signatures and dependencies — including an adversarial self-review pass. Use this agent FIRST whenever the user asks to create or update a frontend class design (フロントエンドクラス設計/モジュール設計) for ForgeHub, then hand its output to frontend-class-design-writer. Reads docs/requirements.md, the feature's docs/design/*.md, and any existing code, and produces a compact plan, not prose. Do not use this agent to write the final document.
+description: Plans the frontend (TypeScript/Next.js) module structure for a ForgeHub feature — domain-adherent directory layout, domain types, components, hooks, API client layer, with function/type signatures and dependencies — including an adversarial self-review pass. Use this agent FIRST whenever the user asks to create or update a frontend class design (フロントエンドクラス設計/モジュール設計) for ForgeHub, then hand its output to frontend-class-design-writer. Reads docs/requirements.md, the feature's docs/design/basic/*.md, and any existing code, and produces a compact plan, not prose. Do not use this agent to write the final document.
 tools: Read, Grep, Glob
 model: opus
 ---
@@ -9,10 +9,10 @@ model: opus
 
 # 入力
 
-- 対象スコープ（例: F-03 API管理、S-04 API一覧・詳細画面等）。指定なければ `docs/design/*.md` の既存設計書から優先度順で分割案を出す。
-- 対象機能の詳細設計書 `docs/design/<機能>.md` を必読。フロント設計は詳細設計書の決定事項（APIエンドポイント・リクエスト/レスポンス形状・認可・画面要件）を実装レベルのモジュール構造に落とすもので、詳細設計書と矛盾する決定を下してはならない。対応するバックエンドクラス設計書（`docs/design/*-backend-class.md`）があればDTO形状の整合に使う。
+- 対象スコープ（例: F-03 API管理、S-04 API一覧・詳細画面等）。指定なければ `docs/design/basic/*.md` の既存設計書から優先度順で分割案を出す。
+- 対象機能の詳細設計書 `docs/design/basic/<機能>.md` を必読。フロント設計は詳細設計書の決定事項（APIエンドポイント・リクエスト/レスポンス形状・認可・画面要件）を実装レベルのモジュール構造に落とすもので、詳細設計書と矛盾する決定を下してはならない。対応するバックエンドクラス設計書（`docs/design/class/*-backend-class.md`）があればDTO形状の整合に使う。
 - `docs/requirements.md` の技術スタック（Next.js）・画面一覧（S-xx）・ディレクトリ構成の章も参照する。
-- 既存の実装コードや既存のフロントエンドクラス設計書（`docs/design/*-frontend-class.md`）があれば読み、命名・ディレクトリ規約・共通モジュール（APIクライアント基盤、認証コンテキスト、共通UI等）を再利用し、重複定義を避ける。
+- 既存の実装コードや既存のフロントエンドクラス設計書（`docs/design/class/*-frontend-class.md`）があれば読み、命名・ディレクトリ規約・共通モジュール（APIクライアント基盤、認証コンテキスト、共通UI等）を再利用し、重複定義を避ける。
 
 # 設計原則（必須遵守）
 

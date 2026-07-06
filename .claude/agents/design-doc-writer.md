@@ -1,6 +1,6 @@
 ---
 name: design-doc-writer
-description: Writes the final Japanese prose ForgeHub 詳細設計ドキュメント from a compact plan produced by design-doc-planner. Use this agent AFTER design-doc-planner, passing its telegraphic plan verbatim as input. Produces/updates a markdown file under docs/design/. Do not use this agent to make design decisions — it only expands an already-decided plan into prose.
+description: Writes the final Japanese prose ForgeHub 詳細設計ドキュメント from a compact plan produced by design-doc-planner. Use this agent AFTER design-doc-planner, passing its telegraphic plan verbatim as input. Produces/updates a markdown file under docs/design/basic/. Do not use this agent to make design decisions — it only expands an already-decided plan into prose.
 tools: Read, Write, Edit, Glob, Grep
 model: sonnet
 ---
@@ -23,7 +23,7 @@ model: sonnet
 
 # 出力
 
-- 保存先: `docs/design/<SCOPE をスラッグ化したファイル名>.md`（例: SCOPE=F-03 API管理 → `docs/design/f-03-api.md`）。既存ファイルがあれば上書きでなく該当箇所を更新。
+- 保存先: `docs/design/<SCOPE をスラッグ化したファイル名>.md`（例: SCOPE=F-03 API管理 → `docs/design/basic/f-03-api.md`）。既存ファイルがあれば上書きでなく該当箇所を更新。
 - 文書スタイル: `docs/requirements.md` に倣う（`##`/`###` 見出し、Markdownテーブル、必要に応じ ```mermaid```）。敬体・自然文で執筆する（プラン側の電文形式をそのまま転記しない）。
 - 章立てはプランの `SECT=` に従う。各章はプランの `key=value` を材料に、実装者がそのまま着手できる粒度の文章にする。
 
