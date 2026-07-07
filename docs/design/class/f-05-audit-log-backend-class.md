@@ -5,6 +5,7 @@
 | 版   | 日付       | 変更内容                     |
 | ---- | ---------- | ---------------------------- |
 | v0.1 | 2026-07-06 | 初版（backend-class-design-planner のプランを正式クラス設計書に展開） |
+| v0.2 | 2026-07-07 | 整合性再監査。F-04確定を受け10章のproducer記述を更新（`JobCommandService`単独＋`（想定）`表記から、`JobCommandService`／`JobExecutionCommandService`の2producer確定へ。2.1節mermaid・10.2節producer表・10.4節残作業を突合） |
 
 ## 1. 位置付け・参照/絶対制約
 
@@ -84,7 +85,7 @@ flowchart LR
         F01["F-01 AuthEventRecorder"]
         F02["F-02 UserCommandService"]
         F03["F-03 ApiDefinitionCommandService / ApiKeyCommandService"]
-        F04["F-04 JobCommandService"]
+        F04["F-04 JobCommandService / JobExecutionCommandService"]
     end
 
     PC --> AS
@@ -886,7 +887,7 @@ public interface AuditService {
 | F-01 | `AuthEventRecorder` | AUTH（5値） | `USER`（`target_id`はnull許容） | 独立best-effort Tx（`append`側は`REQUIRED`により新規独立Tx開始。失敗許容はF-01側責務） | シグネチャ・Tx方式は解消。ローカル5値enumの`com.forgehub.audit.domain.model.AuditAction`への置換・削除は実コード突合が必要（10.4節）。 |
 | F-02 | `UserCommandService` | USER（6値） | `USER` | 業務Tx参加（`REQUIRED`、原子化） | シグネチャ・enum参照は解消。import先を`com.forgehub.audit.application.AuditService`へ確定する突合が必要。 |
 | F-03 | `ApiDefinitionCommandService`/`ApiKeyCommandService` | API（5値） | `API_DEFINITION`/`API_KEY` | 業務Tx参加（`REQUIRED`、原子化） | 同上。 |
-| F-04 | `JobCommandService`（想定） | JOB（4値） | `JOB`/`JOB_EXECUTION` | 業務Tx参加（`REQUIRED`、原子化） | 同上。 |
+| F-04 | `JobCommandService`（`JOB_CREATED`/`JOB_UPDATED`/`JOB_DELETED`→`JOB`）／`JobExecutionCommandService`（`JOB_EXECUTION_TRIGGERED`→`JOB_EXECUTION`） | JOB（4値） | `JOB`/`JOB_EXECUTION` | 業務Tx参加（`REQUIRED`、原子化） | シグネチャ・enum参照・producer分割は`docs/design/class/f-04-job-management-backend-class.md`（6.1/6.3節・13章）確定済みで解消。残件はimport先を`com.forgehub.audit.application.AuditService`へ確定する突合のみ。 |
 
 ### 10.3 シーケンス
 
@@ -931,7 +932,7 @@ sequenceDiagram
 
 - F-01の`com.forgehub.auth.domain.model.AuditAction`（ローカル5値）を削除し、`com.forgehub.audit.domain.model.AuditAction`のインポートへ置換する。
 - F-02/F-03の`AuditService`参照先を`com.forgehub.audit.application.AuditService`へ確定する（現行の各backend-classは具体パッケージ名を明記していない）。
-- F-04の`JobCommandService`（想定クラス）についても同様にimport先を確定する。
+- F-04の`JobCommandService`（`JOB_CREATED`/`JOB_UPDATED`/`JOB_DELETED`）および`JobExecutionCommandService`（`JOB_EXECUTION_TRIGGERED`）の2つのproducer（`docs/design/class/f-04-job-management-backend-class.md` 6.1/6.3節で確定）についても同様にimport先を`com.forgehub.audit.application.AuditService`へ確定する。
 
 ## 11. 例外階層とエラーコード対応
 
